@@ -129,14 +129,13 @@ private struct RootNavigationHost: View, Equatable {
                 header: header,
                 gateway: store.gateway,
                 store: store,
-                sidebarActions: sidebarActions,
                 showsContextUsage: $showsContextUsage,
                 onActivate: {
                     await store.activatePreparedConversation(sessionID: header.sessionID)
                 },
                 onNewSession: {
                     startNewConversation()
-                }
+                },
             ) { activeView, topInset in
                 ConversationView(
                     activeView: activeView,
@@ -199,34 +198,12 @@ private struct RootNavigationHost: View, Equatable {
     private func openLiveActivityURL(_ url: URL) {
         guard url.scheme == "dshmobile", url.host == "session",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let gatewayID = components.queryItems?.first(where: { $0.name == "gateway" })?.value,
-              gatewayID == store.gatewayLocalID,
               let sessionID = components.queryItems?.first(where: { $0.name == "id" })?.value else { return }
+        guard let gatewayID = components.queryItems?.first(where: { $0.name == "gateway" })?.value,
+              gatewayID == store.gatewayLocalID else { return }
         pendingLiveActivitySessionID = sessionID
         guard let session = store.sessions.first(where: { $0.id == sessionID }) else { return }
         openLiveActivitySession(session)
-    }
-
-    /// 会话页悬浮侧栏的导航动作；展示状态由会话页自己持有。
-    private var sidebarActions: ConversationSidebarActions {
-        ConversationSidebarActions(
-            openSession: { session in
-                // 已经停在这个会话页就不重复切换。
-                // 有切换还没完成时不能忽略（例如在 A 点了 B 又点回 A），交给 switchToSession 取消并重来。
-                if newConversationTask == nil,
-                   case .conversation(let header)? = navigationPath.last,
-                   header.sessionID == session.id {
-                    return
-                }
-                switchToSession(session)
-            },
-            openPlugins: { navigate(to: .plugins) },
-            openScheduledTasks: { navigate(to: .scheduledTasks) },
-            openSettings: {
-                newConversationTask?.cancel()
-                navigate(to: .settings)
-            }
-        )
     }
 
     private func openLiveActivitySession(_ session: SessionSummary) {
@@ -934,7 +911,6 @@ private struct ConversationNavigationShell<Content: View>: View {
     let header: ConversationNavigationHeader
     let gateway: GatewayClient
     let store: AppStore
-    let sidebarActions: ConversationSidebarActions
     @Binding var showsContextUsage: Bool
     let onActivate: () async -> Void
     /// 我方「笔」按钮：开始一个新会话并替换当前路由。

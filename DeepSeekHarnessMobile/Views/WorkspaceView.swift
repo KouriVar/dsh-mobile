@@ -65,7 +65,7 @@ struct WorkspaceView: View {
                 (colorScheme == .dark
                     ? Color(red: 36.0 / 255, green: 36.0 / 255, blue: 38.0 / 255)
                     : Color.white)
-                drawerContent(progress: progress, topInset: topInset, width: drawerWidth)
+                drawerContent(progress: progress, topInset: topInset, width: drawerWidth, bottomInset: safeArea.bottom)
                     .padding(.leading, safeArea.leading)
                     .frame(width: drawerWidth, height: fullHeight, alignment: .topLeading)
                     .highPriorityGesture(drawerClosingGesture(width: drawerWidth))
@@ -299,54 +299,37 @@ struct WorkspaceView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func drawerContent(progress: CGFloat, topInset: CGFloat, width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HarnessMark(onDarkBackground: colorScheme == .dark, width: min(width - 48, 216))
-                .padding(.leading, 12)
-                .padding(.bottom, 16)
-
-            drawerItem("插件", icon: {
-                Image("DshPluginPinwheel")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 22, height: 22)
-                    .frame(width: 24)
-            }, action: { selectDrawerItem(onPlugins) })
-            drawerItem("定时任务", icon: {
-                Image(systemName: "clock")
-                    .resizable()
-                    .scaledToFit()
-                    .fontWeight(.medium)
-                    .frame(width: 22, height: 22)
-                    .frame(width: 24)
-            }, action: { selectDrawerItem(onScheduledTasks) })
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, topInset + 18)
+    /// 首页抽屉：与聊天页侧边栏共用 `AppSidebar`（品牌+搜索 / 插件+定时任务 / 分割线 / 文件夹+会话）。
+    private func drawerContent(progress: CGFloat, topInset: CGFloat, width: CGFloat, bottomInset: CGFloat) -> some View {
+        AppSidebar(
+            sessions: drawerSessions,
+            workspaces: store.workspaces,
+            selectedSessionID: store.selectedSessionId,
+            searchResults: store.searchResults,
+            actions: AppSidebarActions(
+                openSession: { session in selectDrawerItem { onOpenSession(session) } },
+                openNewSession: { selectDrawerItem(onNewSession) },
+                openPlugins: { selectDrawerItem(onPlugins) },
+                openScheduledTasks: { selectDrawerItem(onScheduledTasks) },
+                openSettings: { selectDrawerItem(onSettings) }
+            ),
+            bottomInset: bottomInset,
+            onSearchQueryChange: { query in
+                // 抽屉搜索与首页搜索共用 store 的检索状态：首页已有查询词时不覆盖。
+                if searchQuery.isEmpty || !query.isEmpty { store.search(query) }
+            }
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, topInset + 10)
         .foregroundStyle(Color(uiColor: .label))
         .opacity(0.6 + 0.4 * progress)
         .scaleEffect(0.9 + 0.1 * progress, anchor: .leading)
         .accessibilityHidden(progress == 0)
     }
 
-    private func drawerItem<Icon: View>(
-        _ title: String,
-        @ViewBuilder icon: () -> Icon,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                icon()
-                Text(title).appFont(.system(size: 17))
-                Spacer(minLength: 0)
-            }
-            .frame(minHeight: 52)
-            .padding(.horizontal, 14)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+    /// 与首页同一口径的可见会话：`historySessions` 已排除团队子会话与子代理，这里再排除已归档。
+    private var drawerSessions: [SessionSummary] {
+        store.historySessions.filter { !store.archivedSessionIds.contains($0.id) }
     }
 
     private func openDrawer(width: CGFloat) {

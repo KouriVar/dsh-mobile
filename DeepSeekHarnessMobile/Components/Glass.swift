@@ -103,23 +103,37 @@ struct ConnectionDot: View {
     }
 }
 
+/// 品牌字标：`DeepSeek` + `HARNESS` 小标签。
+/// 首页（深蓝底）与侧边栏（浅色底）共用；按 `width` 等比缩放，尺寸与旧版字标一致。
 struct HarnessMark: View {
     var onDarkBackground = true
     var width: CGFloat = 216
 
+    private var scale: CGFloat { max(0.55, width / 216) }
+    private var primaryColor: Color { onDarkBackground ? .white : .black }
+    private var tagBackground: Color { onDarkBackground ? .white : .black }
+    private var tagForeground: Color { onDarkBackground ? .black : .white }
+
     var body: some View {
-        HStack(spacing: 4) {
-            WhalenessOrcaIcon(size: 29)
-                .foregroundStyle(onDarkBackground ? Color.white : Color.black)
-            Image("WhalenessHarnessWordmark")
-                .resizable()
-                .scaledToFit()
-                .colorInvertIfNeeded(onDarkBackground)
-                .frame(maxWidth: .infinity, maxHeight: 29, alignment: .leading)
+        HStack(spacing: 8 * scale) {
+            Text("DeepSeek")
+                .font(.system(size: 28 * scale, weight: .bold))
+                .foregroundStyle(primaryColor)
+                .fixedSize()
+            Text("HARNESS")
+                .font(.system(size: 11 * scale, weight: .bold))
+                .tracking(0.6 * scale)
+                .foregroundStyle(tagForeground)
+                .padding(.horizontal, 6 * scale)
+                .padding(.vertical, 3 * scale)
+                .background(
+                    RoundedRectangle(cornerRadius: 4 * scale, style: .continuous)
+                        .fill(tagBackground)
+                )
+                .fixedSize()
         }
         .frame(maxWidth: width, alignment: .leading)
-        .frame(height: 29)
-        .accessibilityLabel("Whaleness Harness")
+        .accessibilityLabel("DeepSeek Harness")
     }
 }
 
