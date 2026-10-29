@@ -12,8 +12,16 @@
 - 导航栏副标题重复：上游把标题移入 principal `ToolbarItem`，与 `navigationSubtitle` 叠加后出现三行；已改回系统标题位（`navigationTitle` + `navigationSubtitle`），恢复「标题 + 文件夹 · 主机」两行。
 - `ConversationViewport` 合并后 `topInset` 重复声明、`topInset`/`bottomInset` 实参顺序与上游声明顺序不一致，均已修正。
 
+### 调整（标题栏定稿）
+- 标题栏只保留三项：**返回**（系统）、**项目名称**（`navigationTitle`）、**项目文件夹**（`navigationSubtitle`）。
+- 移除会话侧栏按钮（`sidebarButton`、`showsSidebar`、侧栏 popover 与 `ConversationSidebar` 接线一并删除；侧栏视图文件保留备用）。
+- 移除「新建会话」笔按钮（`newSessionButton`）；`onNewSession` 通道保留供后续入口复用。
+- 「成员」入口（`TeamNavigationEntry`）移到原新建按钮的位置，与「更多」合并为一个工具栏胶囊；`compactHeader` 下右侧仅 2 个图标。
+- 同时移除未被启用的上游 principal 标题组件（`pageTitle`），标题统一走系统标题位。
+
 ### 已知
-- 右侧工具栏因上游新增「团队入口」「会话侧栏」由验收态的 2 个图标变为 4 个，副标题可显示宽度变短；侧栏按钮是侧栏唯一入口，暂未移除，待后续 UI 调整。
+- 副标题目前仍为「文件夹 · 主机」（如 `默认文件-DeepSeek · 192.168.31.131`）；若只需文件夹名可再收窄。
+- 会话侧栏功能已无 UI 入口（代码保留），如需恢复建议挂到「更多」菜单。
 
 ## [Unreleased] — 移动端对话页 UI 改版（基于 v1.7.11 源码 9bf3955）
 

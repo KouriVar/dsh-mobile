@@ -947,8 +947,6 @@ private struct ConversationNavigationShell<Content: View>: View {
     @State private var livePresetTitle: String?
     @State private var liveSubtitle: String = ""
     @State private var showsTeamEntry = false
-    @State private var showsSidebar = false
-    @State private var sidebarAvailableHeight: CGFloat = 0
     @State private var compactHeader = false
 
     var body: some View {
@@ -960,25 +958,14 @@ private struct ConversationNavigationShell<Content: View>: View {
             .onGeometryChange(for: CGSize.self) { geometry in
                 geometry.size
             } action: { size in
-                sidebarAvailableHeight = size.height
                 compactHeader = size.width < 600
             }
-            // 标题/副标题走系统导航标题位（我方验收态）：标题用 navigationTitle，
-            // 「工作区文件夹 · 主机」用 navigationSubtitle。上游的 principal pageTitle
-            // 会把副标题挤进右侧图标区（实测被截断成「默…」），故不启用。
+            // 标题栏最终形态：返回（系统）+ 项目名称（navigationTitle）+ 项目文件夹（navigationSubtitle）。
+            // 上游把标题搬进 principal 的做法会让副标题被右侧图标挤断，故不启用。
             .navigationTitle(liveTitle ?? header.title)
-            .toolbar {
-                if !compactHeader {
-                    ToolbarItem(placement: .topBarLeading) { sidebarButton }
-                }
-            }
             .onChangeCompat(of: header.sessionID) { _, _ in
-                showsSidebar = false
                 liveTitle = nil
                 livePresetTitle = nil
-            }
-            .onDisappear {
-                showsSidebar = false
             }
             .onReceive(store.$sessions) { sessions in
                 let sessionID = header.sessionID ?? store.selectedSessionId
@@ -1015,15 +1002,6 @@ private struct ConversationNavigationShell<Content: View>: View {
                             TeamNavigationEntry(store: store)
                                 .fixedSize(horizontal: true, vertical: false)
                         }
-                        .sharedBackgroundVisibility(.hidden)
-                        ToolbarSpacer(.fixed, placement: .topBarTrailing)
-                    }
-                    if compactHeader {
-                        ToolbarItem(placement: .topBarTrailing) { sidebarButton }
-                        ToolbarSpacer(.fixed, placement: .topBarTrailing)
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        newSessionButton
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         moreMenu
@@ -1036,12 +1014,6 @@ private struct ConversationNavigationShell<Content: View>: View {
                         ToolbarItem(placement: .topBarTrailing) {
                             TeamNavigationEntry(store: store)
                         }
-                    }
-                    if compactHeader {
-                        ToolbarItem(placement: .topBarTrailing) { sidebarButton }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        newSessionButton
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         moreMenu
@@ -1067,65 +1039,6 @@ private struct ConversationNavigationShell<Content: View>: View {
             }
     }
 
-    private var sidebarButton: some View {
-        Button {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            showsSidebar.toggle()
-        } label: {
-            Image(systemName: "sidebar.left")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 22, height: 22)
-        }
-        .accessibilityLabel("展开侧边栏")
-        .accessibilityIdentifier("conversation-sidebar-toggle")
-        .popover(isPresented: $showsSidebar, arrowEdge: .top) {
-            if #available(iOS 16.4, *) {
-                sidebarPanel.presentationCompactAdaptation(.popover)
-            } else {
-                sidebarPanel
-            }
-        }
-    }
-
-    private var sidebarPanel: some View {
-        ConversationSidebar(store: store, actions: dismissingSidebarActions)
-            .frame(idealHeight: sidebarAvailableHeight, maxHeight: sidebarAvailableHeight)
-    }
-
-    private var pageTitle: some View {
-        ConversationNavigationTitle(
-            title: liveTitle ?? header.title,
-            subtitle: liveSubtitle,
-            gateway: gateway,
-            agentPresetTitle: livePresetTitle ?? header.agentPresetTitle,
-            selectedPage: activeView,
-            compact: compactHeader
-        )
-    }
-
-    /// 先关闭悬浮面板，再复用现有会话切换或导航操作；不改变正文宽度。
-    private var dismissingSidebarActions: ConversationSidebarActions {
-        ConversationSidebarActions(
-            openSession: { session in
-                showsSidebar = false
-                sidebarActions.openSession(session)
-            },
-            openPlugins: {
-                showsSidebar = false
-                sidebarActions.openPlugins()
-            },
-            openScheduledTasks: {
-                showsSidebar = false
-                sidebarActions.openScheduledTasks()
-            },
-            openSettings: {
-                showsSidebar = false
-                sidebarActions.openSettings()
-            }
-        )
-    }
-
     private var moreMenu: some View {
         Menu {
             Button(activeView == 1 ? String(localized: "对话") : String(localized: "轨迹"),
@@ -1148,15 +1061,6 @@ private struct ConversationNavigationShell<Content: View>: View {
             Image(systemName: "ellipsis")
         }
         .accessibilityLabel("更多")
-    }
-
-    private var newSessionButton: some View {
-        Button {
-            onNewSession()
-        } label: {
-            Image(systemName: "square.and.pencil")
-        }
-        .accessibilityLabel("新建会话")
     }
 
     private var conversationStatus: some View {
