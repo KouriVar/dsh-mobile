@@ -5438,9 +5438,8 @@ private struct TeamCachedMenuButton: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> UIButton {
-        var configuration: UIButton.Configuration
-        if #available(iOS 26.0, *) { configuration = .glass() }
-        else { configuration = .plain() }
+        // 工具栏只保留纯图标入口：胶囊底由工具栏负责，按钮自身不画背景。
+        var configuration = UIButton.Configuration.plain()
         configuration.cornerStyle = .capsule
         configuration.contentInsets = .zero
         configuration.image = Self.glyph

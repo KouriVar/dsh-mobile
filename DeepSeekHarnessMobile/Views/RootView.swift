@@ -948,6 +948,7 @@ private struct ConversationNavigationShell<Content: View>: View {
     @State private var liveSubtitle: String = ""
     @State private var showsTeamEntry = false
     @State private var compactHeader = false
+    @Environment(\.dismiss) private var dismissShell
 
     var body: some View {
         GeometryReader { geometry in
@@ -960,9 +961,14 @@ private struct ConversationNavigationShell<Content: View>: View {
             } action: { size in
                 compactHeader = size.width < 600
             }
-            // 标题栏最终形态：返回（系统）+ 项目名称（navigationTitle）+ 项目文件夹（navigationSubtitle）。
+            // 标题栏最终形态：返回（细描边自绘）+ 项目名称（navigationTitle）+ 项目文件夹（navigationSubtitle）。
             // 上游把标题搬进 principal 的做法会让副标题被右侧图标挤断，故不启用。
             .navigationTitle(liveTitle ?? header.title)
+            .navigationBarBackButtonHidden(true)
+            .background {
+                // 隐藏系统返回键后 NavigationStack 会停用侧滑返回，这里把手势重新打开。
+                InteractivePopGestureEnabler().frame(width: 0, height: 0)
+            }
             .onChangeCompat(of: header.sessionID) { _, _ in
                 liveTitle = nil
                 livePresetTitle = nil
@@ -989,6 +995,9 @@ private struct ConversationNavigationShell<Content: View>: View {
             .toolbarBackground(.hidden, for: .navigationBar)
             .modifier(ConversationScrollEdgeStyle())
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    backButton
+                }
                 if #available(iOS 26.0, *) {
                     if !compactHeader {
                         ToolbarItem(placement: .topBarTrailing) {
@@ -1002,6 +1011,8 @@ private struct ConversationNavigationShell<Content: View>: View {
                             TeamNavigationEntry(store: store)
                                 .fixedSize(horizontal: true, vertical: false)
                         }
+                        .sharedBackgroundVisibility(.hidden)
+                        ToolbarSpacer(.fixed, placement: .topBarTrailing)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         moreMenu
@@ -1039,6 +1050,17 @@ private struct ConversationNavigationShell<Content: View>: View {
             }
     }
 
+    /// 细描边返回键：系统返回键的 chevron 偏粗，这里自绘一个 light 字重的版本。
+    private var backButton: some View {
+        Button {
+            dismissShell()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 17, weight: .light))
+        }
+        .accessibilityLabel("返回")
+    }
+
     private var moreMenu: some View {
         Menu {
             Button(activeView == 1 ? String(localized: "对话") : String(localized: "轨迹"),
@@ -1067,6 +1089,31 @@ private struct ConversationNavigationShell<Content: View>: View {
         ConversationNavigationStatus(gateway: gateway, agentPresetTitle: livePresetTitle ?? header.agentPresetTitle)
     }
 
+}
+
+/// 隐藏系统返回键后重新启用侧滑返回（NavigationStack 在自定义返回键下会停用该手势）。
+private struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController { Controller() }
+    func updateUIViewController(_ controller: UIViewController, context: Context) {}
+
+    private final class Controller: UIViewController {
+        override func didMove(toParent parent: UIViewController?) {
+            super.didMove(toParent: parent)
+            enable()
+        }
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            enable()
+        }
+
+        private func enable() {
+            guard let navigationController,
+                  navigationController.viewControllers.count > 1 else { return }
+            navigationController.interactivePopGestureRecognizer?.delegate = nil
+            navigationController.interactivePopGestureRecognizer?.isEnabled = true
+        }
+    }
 }
 
 /// iOS 26 才有的导航副标题；旧系统降级为无副标题。

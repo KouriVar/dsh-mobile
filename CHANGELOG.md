@@ -18,9 +18,11 @@
 - 移除「新建会话」笔按钮（`newSessionButton`）；`onNewSession` 通道保留供后续入口复用。
 - 「成员」入口（`TeamNavigationEntry`）移到原新建按钮的位置，与「更多」合并为一个工具栏胶囊；`compactHeader` 下右侧仅 2 个图标。
 - 同时移除未被启用的上游 principal 标题组件（`pageTitle`），标题统一走系统标题位。
+- 副标题只显示**项目文件夹名**（`conversationWorkspaceSubtitle` 不再拼接「· 主机」）。
+- 成员按钮去掉自带 `.glass()` 胶囊与工具栏共享底，只保留裸图标；「更多」保留独立胶囊。
+- 返回键改为自绘 `chevron.left`（light 字重），并用 `InteractivePopGestureEnabler` 保住侧滑返回。
 
 ### 已知
-- 副标题目前仍为「文件夹 · 主机」（如 `默认文件-DeepSeek · 192.168.31.131`）；若只需文件夹名可再收窄。
 - 会话侧栏功能已无 UI 入口（代码保留），如需恢复建议挂到「更多」菜单。
 
 ## [Unreleased] — 移动端对话页 UI 改版（基于 v1.7.11 源码 9bf3955）

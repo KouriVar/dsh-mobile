@@ -2758,16 +2758,15 @@ final class AppStore: ObservableObject {
     }
 
     /// 会话副标题：当前工作区文件夹 · 主机名（随工作区变动），用于导航栏标题下方。
+    /// 导航栏副标题：只显示项目文件夹名（主机名不再拼接）。
     func conversationWorkspaceSubtitle(for sessionID: String?) -> String {
-        let host = gatewayDisplayName.isEmpty ? "Whaleness" : gatewayDisplayName
         guard let sessionID,
               let workspace = workspaces.first(where: { $0.sessionIds.contains(sessionID) }) else {
-            return host
+            return ""
         }
-        let workspaceName = workspace.title.isEmpty
+        return workspace.title.isEmpty
             ? URL(fileURLWithPath: workspace.path).lastPathComponent
             : workspace.title
-        return workspaceName.isEmpty ? host : "\(workspaceName) · \(host)"
     }
 
     private func beginSnapshotWait(for sessionID: String) {
