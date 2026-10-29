@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased] — 合并上游 4 个提交（upstream/main @ 1d4f603）
+
+### 合并
+- 合并 `upstream/main`（`de9bace` 完善 Android 功能与界面、`1fa7aa7` 移除 3083 行废弃代码、`8859a80` 会话分页与顶部玻璃蒙层、`1d4f603` Android 架构与功能）。冲突文件 4 个：`ConversationView.swift`、`RootView.swift`、`ConversationViewport.swift`、`project.pbxproj`。
+- 冲突策略：保留我方 ChatGPT 风格导航栏与输入框改版的结构与视觉，移植上游功能增量（会话侧栏、分页指示器、`topContentInset` 容器契约、非 iOS 26 顶部玻璃蒙层、数学公式与代码高亮、Live Activity 扩展）。
+- 上游 `AgentLiveActivityWidget` 扩展 target 带入了其个人签名配置（`DEVELOPMENT_TEAM = SHVN6YQNQF / T58RY5HUA7`、`com.lichaofan.dshmobile` 包名硬编码），已统一改回 `$(LOCAL_DEVELOPMENT_TEAM)` / `$(LOCAL_BUNDLE_IDENTIFIER)`，否则本机无法签名装机。
+- 我方 `ConversationView` 的键盘安全区（GeometryReader + Home Indicator）与输入框折叠动画整体保留；上游 `topContentInset` 契约接入为 `pageTopInset`。
+
+### 修复
+- 导航栏副标题重复：上游把标题移入 principal `ToolbarItem`，与 `navigationSubtitle` 叠加后出现三行；已改回系统标题位（`navigationTitle` + `navigationSubtitle`），恢复「标题 + 文件夹 · 主机」两行。
+- `ConversationViewport` 合并后 `topInset` 重复声明、`topInset`/`bottomInset` 实参顺序与上游声明顺序不一致，均已修正。
+
+### 已知
+- 右侧工具栏因上游新增「团队入口」「会话侧栏」由验收态的 2 个图标变为 4 个，副标题可显示宽度变短；侧栏按钮是侧栏唯一入口，暂未移除，待后续 UI 调整。
+
 ## [Unreleased] — 移动端对话页 UI 改版（基于 v1.7.11 源码 9bf3955）
 
 ### 新增 / 改进

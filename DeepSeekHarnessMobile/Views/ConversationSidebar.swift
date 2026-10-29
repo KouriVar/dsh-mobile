@@ -55,7 +55,7 @@ struct ConversationSidebar: View {
                 .padding(.top, 18)
                 .padding(.bottom, 6)
 
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(workspaces) { workspace in
                         workspaceSection(
@@ -92,6 +92,7 @@ struct ConversationSidebar: View {
                 ? Color(red: 28.0 / 255, green: 28.0 / 255, blue: 30.0 / 255)
                 : Color(white: 0.96))
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("conversation-sidebar")
         .onAppear {
             expandedKeys = Set(expandedStorage.split(separator: ",").map(String.init))
