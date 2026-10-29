@@ -2752,6 +2752,19 @@ final class AppStore: ObservableObject {
         return workspaceName.isEmpty ? host : "\(host) · \(workspaceName)"
     }
 
+    /// 会话副标题：当前工作区文件夹 · 主机名（随工作区变动），用于导航栏标题下方。
+    func conversationWorkspaceSubtitle(for sessionID: String?) -> String {
+        let host = gatewayDisplayName.isEmpty ? "Whaleness" : gatewayDisplayName
+        guard let sessionID,
+              let workspace = workspaces.first(where: { $0.sessionIds.contains(sessionID) }) else {
+            return host
+        }
+        let workspaceName = workspace.title.isEmpty
+            ? URL(fileURLWithPath: workspace.path).lastPathComponent
+            : workspace.title
+        return workspaceName.isEmpty ? host : "\(workspaceName) · \(host)"
+    }
+
     private func beginSnapshotWait(for sessionID: String) {
         historyLoadErrors[sessionID] = nil
         if pendingSnapshotSessionID != sessionID { cancelSnapshotWait() }

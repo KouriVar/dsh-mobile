@@ -366,7 +366,8 @@ struct ConversationView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var activeView = 0
+    /// 0 = 对话（默认），1 = 轨迹。由导航栏「更多」菜单切换，会话页不再显示分段切换条。
+    @Binding var activeView: Int
     @State private var draft = ""
     @State private var memberDrafts: [String: String] = [:]
     @State private var memberImages: [String: [GatewayOutgoingImage]] = [:]
@@ -380,7 +381,7 @@ struct ConversationView: View {
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var pendingImages: [GatewayOutgoingImage] = []
     @State private var isImportingImages = false
-    @State private var showsContextUsage = false
+    @Binding var showsContextUsage: Bool
     @State private var showsSessionStats = false
     @State private var showsSessionStatsPopover = false
     @State private var tasksExpanded = false
@@ -394,6 +395,7 @@ struct ConversationView: View {
     @State private var submittedQueueImages: [GatewayOutgoingImage] = []
     @State private var submittedQueueSessionID: String?
     @State private var composerHeight: CGFloat = 168
+    @Namespace private var composerMorph
     @State private var viewportScrollToBottomToken = 0
     @State private var viewportProxy = ConversationViewportProxy()
     @State private var expandedConversationNodeIDsBySession: [String: Set<String>] = [:]
@@ -401,7 +403,9 @@ struct ConversationView: View {
     @State private var historyPresentationSessionID: String?
     @State private var viewportHasConversationContent = false
     @State private var viewportContentSessionID: String?
-    @State private var bottomSafeAreaInset: CGFloat = 0
+    @State private var bottomSafeAreaInset: CGFloat = 34
+    /// 状态栏高度（仅状态栏，不含导航栏）。顶部渐隐模糊只作用于这一段。
+    @State private var topStatusBarInset: CGFloat = 59
     @State private var voiceWindowHeight: CGFloat = 0
     // 输入主体是 UIKit UITextView，不需要 SwiftUI FocusState 参与焦点仲裁。
     // 普通 State 作为单向的显式聚焦/失焦请求，UITextView 自己持有第一响应者。
@@ -411,37 +415,40 @@ struct ConversationView: View {
     private let conversationBottomClearance: CGFloat = 22
 
     var body: some View {
-        ZStack {
-            conversationBackground.ignoresSafeArea()
-            VStack(spacing: 0) {
-                if store.isViewingTeamMember {
-                    Text("团队 › \(store.selectedSession?.title ?? "成员")" + (store.selectedMemberCanSend ? "" : " · 只读"))
-                        .appFont(.caption).foregroundStyle(.secondary).lineLimit(1).padding(.bottom, 4)
+        // 正文铺满到导航栏下方，滚动时滑入栏下由毛玻璃温柔虚化（iOS 26 渐进模糊）。
+        // 高度用窗口 Home Indicator（不含键盘）计算：键盘弹出时容器变短，输入框随之上移。
+        GeometryReader { geometry in
+            let topInset = geometry.safeAreaInsets.top
+            let homeIndicator = bottomSafeAreaInset > 0 ? bottomSafeAreaInset : 34
+            let fullHeight = geometry.size.height + topInset + homeIndicator
+            ZStack {
+                conversationBackground
+                VStack(spacing: 0) {
+                    if store.isViewingTeamMember {
+                        Text("团队 › \(store.selectedSession?.title ?? "成员")" + (store.selectedMemberCanSend ? "" : " · 只读"))
+                            .appFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .padding(.top, topInset)
+                            .padding(.bottom, 4)
+                    }
+                    PersistentSessionPager(selection: $activeView) {
+                        chat(topInset: topInset)
+                    } trajectory: {
+                        TrajectoryView(
+                            sessionId: store.selectedSessionId,
+                            timeline: store.trajectoryTimeline(for: store.selectedSessionId),
+                            isActive: activeView == 1
+                        )
+                        .padding(.top, topInset)
+                    }
                 }
-                Picker("视图", selection: $activeView) {
-                    Text("对话").tag(0)
-                    Text("轨迹").tag(1)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 40)
-                .readableContentWidth(440)
-                .padding(.vertical, 6)
-
-                PersistentSessionPager(selection: $activeView) {
-                    chat
-                } trajectory: {
-                    TrajectoryView(
-                        sessionId: store.selectedSessionId,
-                        timeline: store.trajectoryTimeline(for: store.selectedSessionId),
-                        isActive: activeView == 1
-                    )
-                }
+                .frame(width: geometry.size.width, height: fullHeight)
             }
+            .frame(width: geometry.size.width, height: fullHeight)
+            .offset(y: -topInset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea(.container, edges: .bottom)
         .background {
-            WindowBottomSafeAreaReader(bottomInset: $bottomSafeAreaInset, windowHeight: $voiceWindowHeight)
+            WindowBottomSafeAreaReader(bottomInset: $bottomSafeAreaInset, windowHeight: $voiceWindowHeight, topInset: $topStatusBarInset)
         }
         .foregroundStyle(.primary)
         .onChangeCompat(of: activeView) { _, view in
@@ -465,6 +472,9 @@ struct ConversationView: View {
                 snapshot: store.selectedSessionStatsSnapshot,
                 sessionTitle: store.selectedSession?.title ?? String(localized: "session.new.fallback", defaultValue: "新建 DeepSeek Harness")
             )
+        }
+        .sheet(isPresented: $showsContextUsage) {
+            ContextUsagePopover(snapshot: store.selectedContextSnapshot)
         }
     }
 
@@ -498,7 +508,7 @@ struct ConversationView: View {
         .black.opacity(colorScheme == .dark ? 0.34 : 0.10)
     }
 
-    private var chat: some View {
+    private func chat(topInset: CGFloat) -> some View {
         let sessionID = store.selectedSessionId
         return ZStack(alignment: .bottom) {
             ConversationViewport(
@@ -512,6 +522,7 @@ struct ConversationView: View {
                     makeConversationViewportEntries(from: items)
                 },
                 bottomInset: composerHeight + conversationBottomClearance,
+                topInset: topInset,
                 scrollToBottomToken: viewportScrollToBottomToken,
                 onContentAvailabilityChanged: { sessionID, hasContent in
                     Task { @MainActor in
@@ -553,19 +564,8 @@ struct ConversationView: View {
             // controller，不能让上一 Session 的 diffable snapshot 参与新页面首帧。
             .id(sessionID ?? "__empty__")
             .padding(.horizontal, 20)
-            .padding(.top, 8)
             .opacity(shouldShowHistoryPresentationMask ? 0 : 1)
             .readableContentWidth()
-            // 线条不受正文限宽和左右留白约束，高度仍对齐视口的裁切上缘。
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.35))
-                    .frame(height: 1 / max(displayScale, 1))
-                    .padding(.top, 8)
-                    .opacity(hasScrolledFromTop ? 1 : 0)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
 
             if !hasVisibleConversationContent, let error = selectedHistoryError {
                 historyFailureState(error)
@@ -1061,11 +1061,71 @@ struct ConversationView: View {
                     .padding(.horizontal, 14)
                     .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
-            composerCard
+            ZStack(alignment: .bottom) {
+                if composerCollapsed {
+                    composerCapsule
+                        .matchedGeometryEffect(id: "composerMorph", in: composerMorph)
+                        .transition(.opacity)
+                } else {
+                    composerCard
+                        .matchedGeometryEffect(id: "composerMorph", in: composerMorph)
+                        .transition(.opacity)
+                }
+            }
                 .zIndex(1)
         }
         .animation(queueLayoutAnimation, value: store.selectedQueueItems.isEmpty)
         .animation(queueLayoutAnimation, value: queueExpanded)
+        .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.55), value: composerCollapsed)
+    }
+
+    /// 滚动离开底部时收成胶囊；点开 / 回到底部 / 有草稿时恢复方框。
+    private var composerCollapsed: Bool {
+        !isPinnedToBottom && !composerIsFocused
+            && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && pendingImages.isEmpty
+            && store.selectedQueueItems.isEmpty
+            && !voiceState.voiceMode
+            && store.fileUploads.drafts.isEmpty
+    }
+
+    /// 折叠态：胶囊输入条，只保留＋和语音（其余图标隐藏）。
+    private var composerCapsule: some View {
+        HStack(spacing: 12) {
+            AnyView(attachmentMenu)
+            Button {
+                composerIsFocused = true
+            } label: {
+                Text("描述你想要构建的内容")
+                    .appFont(.body)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                store.voiceInput.setVoiceMode(true)
+                composerIsFocused = false
+            } label: {
+                Image(systemName: "waveform")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(colorScheme == .dark ? .black : .white)
+            }
+            .frame(width: 28, height: 28)
+            .background(colorScheme == .dark ? Color.white : Color.black, in: Circle())
+            .buttonStyle(.plain)
+            .accessibilityLabel("语音输入")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .glassSurface(radius: 999, tint: glassTint, shadowOpacity: 0)
+        .clipShape(Capsule())
+        .overlay { Capsule().stroke(glassEdge, lineWidth: 0.7) }
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.24 : 0.10), radius: 10, x: 0, y: 2)
+        .padding(.horizontal, 14)
+        .padding(.bottom, composerBottomPadding)
     }
 
     private var queueLayoutAnimation: Animation {
@@ -1092,13 +1152,11 @@ struct ConversationView: View {
             }
             .disabled(store.isViewingTeamMember || store.fileUploads.drafts.count >= 20 || store.fileUploads.preparing)
         } label: {
-            Image(systemName: "plus.circle")
-                .appFont(.system(size: 21, weight: .regular))
-                // SF Symbol 自身含侧边留白，补偿后与语音圆按钮保持相同可见边距。
-                .offset(x: -2)
-                // 可见图标贴齐输入框的内容边缘，点击区域仍保留 32pt。
-                .frame(width: 32, height: 32, alignment: .leading)
-                .contentShape(Circle())
+            Image(systemName: "plus")
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(.primary)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(store.messageSubmissionPending)
@@ -1160,116 +1218,9 @@ struct ConversationView: View {
                     }.appFont(.caption)
                 }
             }
-            HStack(spacing: 7) {
-                attachmentMenu
-
-                if !store.isViewingTeamMember { permissionControl }
-
-                Spacer(minLength: 2)
-
-                if !store.isViewingTeamMember { modelControl }
-                else {
-                    Text(store.selectedSession?.title ?? "成员会话").appFont(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-
-                Button { showsContextUsage = true } label: {
-                    if contextIsLoading && store.selectedContextSnapshot == nil {
-                        ProgressView().controlSize(.small).frame(width: 26, height: 26)
-                    } else {
-                        ContextUsageRing(progress: contextProgress)
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(store.selectedContextSnapshot == nil)
-                .accessibilityLabel(String(localized: "a11y.context.percent", defaultValue: "上下文已用 \(Int(contextProgress * 100))%"))
-                .popover(isPresented: $showsContextUsage, arrowEdge: .bottom) {
-                    ContextUsagePopover(snapshot: store.selectedContextSnapshot)
-                }
-
-                Button {
-                    if showsSessionStopButton {
-                        store.cancelSelectedSession()
-                        return
-                    }
-                    if !composerHasContent {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        let enteringVoice = !voiceState.voiceMode
-                        composerIsFocused = !enteringVoice
-                        store.voiceInput.setVoiceMode(enteringVoice)
-                        return
-                    }
-                    let content = store.composedSlashMessage(arguments: draft)
-                    let images = pendingImages
-                    guard store.send(content, images: images) else { return }
-                    if store.messageSubmissionPending {
-                        submittedQueueDraft = draft
-                        submittedQueueImages = images
-                        submittedQueueSessionID = store.selectedSessionId
-                        return
-                    }
-                    if store.commandSubmissionPending {
-                        composerIsFocused = false
-                        return
-                    }
-                    draft = ""
-                    store.clearActiveSlashCommand()
-                    pendingImages = []
-                    selectedPhotoItems = []
-                    composerIsFocused = false
-                    // Sending establishes a new tail-following intent before
-                    // the gateway echoes the user event. The subsequent user
-                    // bubble and first reasoning block can therefore grow
-                    // above the composer without ever being hidden behind it.
-                    viewportScrollToBottomToken &+= 1
-                } label: {
-                    Group {
-                        if showsSessionStopButton {
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .fill(.white)
-                                .frame(width: 14, height: 14)
-                        } else {
-                            Image(systemName: composerHasContent ? "arrow.up" : (voiceState.voiceMode ? "keyboard" : "waveform"))
-                                .appFont(.system(size: 17, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                    .frame(width: 42, height: 42)
-                    .background(DSHColor.ocean, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(
-                    !store.selectedMemberCanSend || (showsSessionStopButton
-                        ? store.isCancellingSelectedSession
-                        : (composerHasContent && (store.sessionAgentPreset.blocksSending || store.waitingForNewSession || isImportingImages || store.fileUploads.preparing || (!store.fileUploads.drafts.isEmpty && !store.fileUploads.canSend) || store.commandSubmissionPending || store.messageSubmissionPending)))
-                )
-                .opacity(
-                    showsSessionStopButton
-                        ? (store.isCancellingSelectedSession ? 0.66 : 1)
-                        : 1
-                )
-                .accessibilityLabel(
-                    showsSessionStopButton
-                        ? String(localized: "a11y.stop-generation", defaultValue: "停止生成")
-                        : (composerHasContent ? String(localized: "a11y.send-message", defaultValue: "发送")
-                           : (voiceState.voiceMode ? String(localized: "切换到文字输入") : String(localized: "切换到语音输入")))
-                )
-                .accessibilityIdentifier("composer-action")
-            }
-            .overlay(alignment: .top) {
-                if voiceState.voiceMode {
-                    // 复用原有 12pt 间隔绘制分割线，不增加输入卡片高度。
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.08))
-                        .frame(height: 0.5)
-                        .offset(y: -6)
-                        .accessibilityHidden(true)
-                        .allowsHitTesting(false)
-                }
-            }
+            composerControls
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
+        .padding(12)
         .glassSurface(radius: 24, tint: glassTint, shadowOpacity: 0)
         // 先收住玻璃自带的向下投影，再单独控制输入框阴影。
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -1326,6 +1277,106 @@ struct ConversationView: View {
             selectedPhotoItems = []
             composerIsFocused = false
         }
+    }
+
+    // Bound the toolbar's generic metadata independently of the surrounding
+    // composer. Resolving the combined type overflowed the main-thread stack
+    // on a physical iPhone when opening a new conversation in Debug builds.
+    private var composerControls: AnyView {
+        AnyView(
+            HStack(spacing: 12) {
+                AnyView(attachmentMenu)
+
+                if !store.isViewingTeamMember { AnyView(permissionControl) }
+
+                Spacer(minLength: 2)
+
+                if !store.isViewingTeamMember { AnyView(modelControl) }
+                else {
+                    Text(store.selectedSession?.title ?? "成员会话").appFont(.caption).foregroundStyle(.primary).lineLimit(1)
+                }
+
+                Button {
+                    if showsSessionStopButton {
+                        store.cancelSelectedSession()
+                        return
+                    }
+                    if !composerHasContent {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        let enteringVoice = !voiceState.voiceMode
+                        composerIsFocused = !enteringVoice
+                        store.voiceInput.setVoiceMode(enteringVoice)
+                        return
+                    }
+                    let content = store.composedSlashMessage(arguments: draft)
+                    let images = pendingImages
+                    guard store.send(content, images: images) else { return }
+                    if store.messageSubmissionPending {
+                        submittedQueueDraft = draft
+                        submittedQueueImages = images
+                        submittedQueueSessionID = store.selectedSessionId
+                        return
+                    }
+                    if store.commandSubmissionPending {
+                        composerIsFocused = false
+                        return
+                    }
+                    draft = ""
+                    store.clearActiveSlashCommand()
+                    pendingImages = []
+                    selectedPhotoItems = []
+                    composerIsFocused = false
+                    // Sending establishes a new tail-following intent before
+                    // the gateway echoes the user event. The subsequent user
+                    // bubble and first reasoning block can therefore grow
+                    // above the composer without ever being hidden behind it.
+                    viewportScrollToBottomToken &+= 1
+                } label: {
+                    Group {
+                        if showsSessionStopButton {
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(colorScheme == .dark ? Color.black : Color.white)
+                                .frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: composerHasContent ? "arrow.up" : (voiceState.voiceMode ? "keyboard" : "waveform"))
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(colorScheme == .dark ? .black : .white)
+                        }
+                    }
+                    .frame(width: 28, height: 28)
+                    .background(colorScheme == .dark ? Color.white : Color.black, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(
+                    !store.selectedMemberCanSend || (showsSessionStopButton
+                        ? store.isCancellingSelectedSession
+                        : (composerHasContent && (store.sessionAgentPreset.blocksSending || store.waitingForNewSession || isImportingImages || store.fileUploads.preparing || (!store.fileUploads.drafts.isEmpty && !store.fileUploads.canSend) || store.commandSubmissionPending || store.messageSubmissionPending)))
+                )
+                .opacity(
+                    showsSessionStopButton
+                        ? (store.isCancellingSelectedSession ? 0.66 : 1)
+                        : 1
+                )
+                .accessibilityLabel(
+                    showsSessionStopButton
+                        ? String(localized: "a11y.stop-generation", defaultValue: "停止生成")
+                        : (composerHasContent ? String(localized: "a11y.send-message", defaultValue: "发送")
+                           : (voiceState.voiceMode ? String(localized: "切换到文字输入") : String(localized: "切换到语音输入")))
+                )
+                .accessibilityIdentifier("composer-action")
+            }
+            .overlay(alignment: .top) {
+                if voiceState.voiceMode {
+                    // 复用原有 12pt 间隔绘制分割线，不增加输入卡片高度。
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(height: 0.5)
+                        .offset(y: -6)
+                        .accessibilityHidden(true)
+                        .allowsHitTesting(false)
+                }
+            }
+        )
     }
 
     @ViewBuilder
@@ -1649,11 +1700,9 @@ struct ConversationView: View {
     }
 
     private var composerBottomPadding: CGFloat {
-        // Keep the overlay's measured height stable across focus changes.
-        // SwiftUI already avoids the keyboard because only the container safe
-        // area is ignored; this inset preserves a comfortable visual gap both
-        // above the Home Indicator and above the keyboard.
-        bottomSafeAreaInset + 10
+        // 输入框距屏幕底部的间距：官方 Home Indicator 为 34，这里给到 40，
+        // 比原来(34+10)更贴近底部。键盘弹出的上移由容器高度收缩负责。
+        40
     }
 
     private var composerBackdrop: some View {
@@ -1820,23 +1869,18 @@ struct ConversationView: View {
     @ViewBuilder
     private var permissionControl: some View {
         if store.selectedSessionId == nil {
-            HStack(spacing: 5) {
+            Group {
                 if defaultConfigurationIsLoading && store.permissionDefault == nil {
                     ProgressView().controlSize(.mini)
-                    Text("读取默认权限…")
-                } else if let permission = store.permissionDefault {
-                    Image(systemName: permissionIcon(permission))
-                    Text(permissionTitle(permission))
                 } else {
-                    Image(systemName: "shield")
-                    Text("默认权限")
+                    Image(systemName: store.permissionDefault.map(permissionIcon) ?? "shield")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.primary)
                 }
             }
-            .appFont(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .frame(minWidth: 92, alignment: .leading)
-            .accessibilityElement(children: .combine)
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel(String(localized: "a11y.defaults.permission", defaultValue: "新会话默认权限：\(store.permissionDefault.map(permissionTitle) ?? String(localized: "未读取"))"))
         } else {
             permissionMenu
@@ -1877,25 +1921,25 @@ struct ConversationView: View {
                         store.setPermission(option.value)
                     } label: {
                         Label(
-                            option.name,
+                            option.displayName,
                             systemImage: option.value == currentPermission ? "checkmark" : permissionIcon(option.value)
                         )
                     }
                 }
             }
         } label: {
-            HStack(spacing: 5) {
+            Group {
                 if permissionIsLoading {
                     ProgressView().controlSize(.mini)
                 } else {
                     Image(systemName: permissionIcon(currentPermission))
+                        .font(.system(size: 22))
+                        .foregroundStyle(.primary)
                 }
-                Text(permissionTitle(currentPermission)).lineLimit(1)
             }
-            .appFont(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-            .frame(minWidth: 78, alignment: .leading)
+            .frame(width: 28, height: 28)
             .contentShape(Rectangle())
+            .accessibilityLabel(permissionTitle(currentPermission))
         }
         .disabled(permissionOptions.isEmpty)
     }
@@ -1970,8 +2014,8 @@ struct ConversationView: View {
     }
 
     private func permissionTitle(_ value: String) -> String {
-        permissionOptions.first(where: { $0.value == value })?.name
-            ?? store.permissionDefaultOptions.first(where: { $0.value == value })?.name
+        permissionOptions.first(where: { $0.value == value })?.displayName
+            ?? store.permissionDefaultOptions.first(where: { $0.value == value })?.displayName
             ?? L10n.permissionName(for: value)
     }
     private func permissionIcon(_ value: String) -> String {
@@ -2688,34 +2732,18 @@ private struct ConversationModelMenuLabel: View {
     let isLoading: Bool
 
     var body: some View {
-        HStack(spacing: 5) {
+        Group {
             if isLoading {
                 ProgressView().controlSize(.mini)
             } else {
-                Text(title)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .layoutPriority(1)
-                if let effortTitle {
-                    Text(effortTitle)
-                        .appFont(.caption2.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .layoutPriority(2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(DSHColor.purple.opacity(0.16), in: Capsule())
-                }
+                Image(systemName: "cube")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.primary)
             }
-            Image(systemName: "chevron.up.chevron.down")
-                .appFont(.system(size: 8, weight: .semibold))
-                .foregroundStyle(.tertiary)
         }
-        .appFont(.caption.weight(.medium))
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        .frame(width: 28, height: 28)
         .contentShape(Rectangle())
+        .accessibilityLabel(title + (effortTitle.map { " · \($0)" } ?? ""))
     }
 }
 
@@ -2909,17 +2937,20 @@ private struct ComposerHeightPreferenceKey: PreferenceKey {
 private struct WindowBottomSafeAreaReader: UIViewRepresentable {
     @Binding var bottomInset: CGFloat
     @Binding var windowHeight: CGFloat
+    @Binding var topInset: CGFloat
 
     func makeUIView(context: Context) -> SafeAreaReportingView {
         let view = SafeAreaReportingView()
         view.onBottomInsetChange = publish
         view.onWindowHeightChange = publishHeight
+        view.onTopInsetChange = publishTop
         return view
     }
 
     func updateUIView(_ view: SafeAreaReportingView, context: Context) {
         view.onBottomInsetChange = publish
         view.onWindowHeightChange = publishHeight
+        view.onTopInsetChange = publishTop
         view.publishBottomInset()
     }
 
@@ -2927,6 +2958,13 @@ private struct WindowBottomSafeAreaReader: UIViewRepresentable {
         guard abs(bottomInset - inset) > 0.5 else { return }
         DispatchQueue.main.async {
             bottomInset = inset
+        }
+    }
+
+    private func publishTop(_ inset: CGFloat) {
+        guard abs(topInset - inset) > 0.5 else { return }
+        DispatchQueue.main.async {
+            topInset = inset
         }
     }
 
@@ -2938,6 +2976,7 @@ private struct WindowBottomSafeAreaReader: UIViewRepresentable {
     final class SafeAreaReportingView: UIView {
         var onBottomInsetChange: ((CGFloat) -> Void)?
         var onWindowHeightChange: ((CGFloat) -> Void)?
+        var onTopInsetChange: ((CGFloat) -> Void)?
 
         override func layoutSubviews() {
             super.layoutSubviews()
@@ -2957,6 +2996,8 @@ private struct WindowBottomSafeAreaReader: UIViewRepresentable {
         func publishBottomInset() {
             let inset = window?.safeAreaInsets.bottom ?? safeAreaInsets.bottom
             onBottomInsetChange?(inset)
+            let topInset = window?.safeAreaInsets.top ?? safeAreaInsets.top
+            onTopInsetChange?(topInset)
             if let height = window?.bounds.height { onWindowHeightChange?(height) }
         }
     }

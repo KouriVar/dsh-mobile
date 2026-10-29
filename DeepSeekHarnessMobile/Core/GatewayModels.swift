@@ -849,6 +849,7 @@ struct GatewayPermissionOption: Codable, Hashable, Sendable, Identifiable {
     var name: String
     var description: String?
     var id: String { value }
+    var displayName: String { L10n.permissionName(for: value, fallback: name) }
 }
 
 struct GatewayAgentPreset: Codable, Hashable, Sendable, Identifiable {

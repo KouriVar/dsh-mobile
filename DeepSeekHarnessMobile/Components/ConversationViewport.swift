@@ -188,6 +188,7 @@ struct ConversationViewport: UIViewControllerRepresentable {
     let supplementalEntries: [ConversationViewportEntry]
     let makeEntries: ([ConversationItem]) -> [ConversationViewportEntry]
     let bottomInset: CGFloat
+    var topInset: CGFloat = 0
     let scrollToBottomToken: Int
     let onContentAvailabilityChanged: (String?, Bool) -> Void
     let onPinnedToBottomChanged: (Bool) -> Void
@@ -229,7 +230,8 @@ struct ConversationViewport: UIViewControllerRepresentable {
             timeline: timeline,
             supplementalEntries: supplementalEntries,
             makeEntries: makeEntries,
-            bottomInset: bottomInset
+            bottomInset: bottomInset,
+            topInset: topInset
         )
         if context.coordinator.lastScrollToBottomToken != scrollToBottomToken {
             context.coordinator.lastScrollToBottomToken = scrollToBottomToken
@@ -345,6 +347,7 @@ final class ConversationViewportController: UIViewController, UICollectionViewDe
     private var supplementalEntries: [ConversationViewportEntry] = []
     private var makeEntries: (([ConversationItem]) -> [ConversationViewportEntry])?
     private var bottomInset: CGFloat = 0
+    private var topInset: CGFloat = 0
     private var pendingApply: (
         entries: [ConversationViewportEntry],
         revision: Int,
@@ -721,7 +724,8 @@ final class ConversationViewportController: UIViewController, UICollectionViewDe
         timeline: ConversationTimeline,
         supplementalEntries: [ConversationViewportEntry],
         makeEntries: @escaping ([ConversationItem]) -> [ConversationViewportEntry],
-        bottomInset: CGFloat
+        bottomInset: CGFloat,
+        topInset: CGFloat
     ) {
         loadViewIfNeeded()
         setSessionID(sessionID)
@@ -729,6 +733,7 @@ final class ConversationViewportController: UIViewController, UICollectionViewDe
         self.supplementalEntries = supplementalEntries
         self.makeEntries = makeEntries
         self.bottomInset = bottomInset
+        self.topInset = topInset
 
         if self.timeline !== timeline {
             positionedSearchTargetID = nil
@@ -918,6 +923,10 @@ final class ConversationViewportController: UIViewController, UICollectionViewDe
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
         collectionView.contentInsetAdjustmentBehavior = .never
+        // iOS 27 把 automatic 解析成了 hard（顶部出现硬边），显式指定 soft 恢复 iOS 26 的柔和渐隐。
+        if #available(iOS 26.0, *) {
+            collectionView.topEdgeEffect.style = .soft
+        }
         // ChatLayout's automatic self-sizing mode is explicitly experimental.
         // During a diffable batch it can recursively re-enter
         // `_updateVisibleCellsNow` when SwiftUI/TextKit invalidates intrinsic
@@ -1195,6 +1204,12 @@ final class ConversationViewportController: UIViewController, UICollectionViewDe
         let unchangedBottomInset = collectionView.contentInset.bottom == bottomInset
         collectionView.contentInset.bottom = bottomInset
         collectionView.verticalScrollIndicatorInsets.bottom = bottomInset
+        // 顶部内容内边距：正文延伸到导航栏下方，但首行仍位于栏下；
+        // 滚动时内容可滑入该区域并由系统 soft 边缘效果柔化。
+        if collectionView.contentInset.top != topInset {
+            collectionView.contentInset.top = topInset
+            collectionView.verticalScrollIndicatorInsets.top = topInset
+        }
         guard collectionView.bounds.width > 0 else {
             // History can arrive during UIViewControllerRepresentable's first
             // update, before Auto Layout assigns the viewport its real width.

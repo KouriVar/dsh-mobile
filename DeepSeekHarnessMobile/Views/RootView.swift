@@ -41,6 +41,10 @@ private struct RootNavigationHost: View, Equatable {
     /// 只有编号仍是自己的才清空 newConversationTask，避免误清掉新任务的句柄。
     @State private var conversationOperationID = UUID()
     @State private var pendingLiveActivitySessionID: String?
+    /// 会话页当前页签：0 = 对话（默认），1 = 轨迹。由导航栏「更多」菜单切换。
+    @State private var conversationPage = 0
+    /// 上下文用量弹窗（从「更多」菜单打开）。
+    @State private var showsContextUsage = false
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.store === rhs.store
@@ -126,11 +130,16 @@ private struct RootNavigationHost: View, Equatable {
                 gateway: store.gateway,
                 store: store,
                 sidebarActions: sidebarActions,
+                pageSelection: $conversationPage,
+                showsContextUsage: $showsContextUsage,
                 onActivate: {
                     await store.activatePreparedConversation(sessionID: header.sessionID)
+                },
+                onNewSession: {
+                    startNewConversation()
                 }
             ) {
-                ConversationView()
+                ConversationView(activeView: $conversationPage, showsContextUsage: $showsContextUsage)
             }
         case .settings:
             SettingsView()
@@ -247,6 +256,23 @@ private struct RootNavigationHost: View, Equatable {
             await Task.yield()
             guard !Task.isCancelled else { return }
             await store.activatePreparedConversation(sessionID: session.id)
+        }
+    }
+
+    /// 导航栏「笔」按钮：开始一个新会话并替换当前路由。
+    private func startNewConversation() {
+        newConversationTask?.cancel()
+        let operationID = UUID()
+        conversationOperationID = operationID
+        newConversationTask = Task { @MainActor in
+            defer { if conversationOperationID == operationID { newConversationTask = nil } }
+            guard await store.prepareNewConversation(), !Task.isCancelled else { return }
+            let header = ConversationNavigationHeader(
+                sessionID: store.selectedSessionId,
+                title: String(localized: "session.new.fallback", defaultValue: "新建 DeepSeek Harness"),
+                agentPresetTitle: agentPresetDisplayName(for: store.agentPresetDefault)
+            )
+            navigationPath = [.conversation(header)]
         }
     }
 
@@ -906,11 +932,15 @@ private struct ConversationNavigationShell<Content: View>: View {
     let gateway: GatewayClient
     let store: AppStore
     let sidebarActions: ConversationSidebarActions
+    @Binding var pageSelection: Int
+    @Binding var showsContextUsage: Bool
     let onActivate: () async -> Void
+    let onNewSession: () -> Void
     @ViewBuilder let content: () -> Content
     @State private var workspaceFilesPresentation: WorkspaceFilesPresentation?
     @State private var liveTitle: String?
     @State private var livePresetTitle: String?
+    @State private var liveSubtitle: String = ""
     @State private var showsTeamEntry = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -929,7 +959,6 @@ private struct ConversationNavigationShell<Content: View>: View {
             } action: { height in
                 sidebarAvailableHeight = height
             }
-            .navigationTitle(liveTitle ?? header.title)
             .toolbar {
                 if showsSidebarToggle {
                     ToolbarItem(placement: .topBarLeading) {
@@ -963,6 +992,10 @@ private struct ConversationNavigationShell<Content: View>: View {
             .onReceive(store.$sessions) { sessions in
                 let sessionID = header.sessionID ?? store.selectedSessionId
                 liveTitle = sessions.first { $0.id == sessionID }?.title
+                liveSubtitle = store.conversationWorkspaceSubtitle(for: sessionID)
+            }
+            .onReceive(store.$workspaces) { _ in
+                liveSubtitle = store.conversationWorkspaceSubtitle(for: header.sessionID ?? store.selectedSessionId)
             }
             .onReceive(store.$sessionAgentPreset) { state in
                 guard state.sessionId == (header.sessionID ?? store.selectedSessionId), let id = state.agentPreset else { return }
@@ -971,16 +1004,13 @@ private struct ConversationNavigationShell<Content: View>: View {
             .onReceive(store.$teamSnapshot) { snapshot in
                 showsTeamEntry = snapshot.visible
             }
+            .navigationTitle(liveTitle ?? header.title)
+            .modifier(NavigationSubtitleModifier(subtitle: liveSubtitle))
             .navigationBarTitleDisplayMode(.inline)
             .toolbarRole(.editor)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 if #available(iOS 26.0, *) {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        conversationStatus
-                            .padding(.trailing, showsTeamEntry ? -8 : 0)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
                     if showsTeamEntry {
                         ToolbarItem(placement: .topBarTrailing) {
                             TeamNavigationEntry(store: store)
@@ -990,16 +1020,19 @@ private struct ConversationNavigationShell<Content: View>: View {
                         ToolbarSpacer(.fixed, placement: .topBarTrailing)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
+                        newSessionButton
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
                         moreMenu
                     }
                 } else {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        conversationStatus
-                    }
                     if showsTeamEntry {
                         ToolbarItem(placement: .topBarTrailing) {
                             TeamNavigationEntry(store: store)
                         }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        newSessionButton
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         moreMenu
@@ -1007,6 +1040,8 @@ private struct ConversationNavigationShell<Content: View>: View {
                 }
             }
             .task(id: header.sessionID ?? "__new-conversation__") {
+                // 每次进入会话页都回到「对话」；轨迹只通过「更多」菜单按需查看。
+                pageSelection = 0
                 // Finish the NavigationStack transaction before beginning any
                 // subscription, history, or session-control work.
                 await Task.yield()
@@ -1047,6 +1082,17 @@ private struct ConversationNavigationShell<Content: View>: View {
 
     private var moreMenu: some View {
         Menu {
+            Button(pageSelection == 1 ? String(localized: "对话") : String(localized: "轨迹"),
+                   systemImage: pageSelection == 1 ? "bubble.left.and.bubble.right" : "list.bullet.rectangle") {
+                pageSelection = pageSelection == 1 ? 0 : 1
+            }
+            .disabled(header.sessionID == nil)
+            Divider()
+            Button(String(localized: "上下文用量"), systemImage: "circle.dashed") {
+                showsContextUsage = true
+            }
+            .disabled(store.selectedContextSnapshot == nil)
+            Divider()
             Button(String(localized: "工作区文件"), systemImage: "folder") {
                 guard let sessionID = store.selectedSessionId else { return }
                 workspaceFilesPresentation = WorkspaceFilesPresentation(sessionID: sessionID, initialPath: nil)
@@ -1058,11 +1104,33 @@ private struct ConversationNavigationShell<Content: View>: View {
         .accessibilityLabel("更多")
     }
 
+    private var newSessionButton: some View {
+        Button {
+            onNewSession()
+        } label: {
+            Image(systemName: "square.and.pencil")
+        }
+        .accessibilityLabel("新建会话")
+    }
+
     private var conversationStatus: some View {
         ConversationNavigationStatus(
             gateway: gateway,
             agentPresetTitle: livePresetTitle ?? header.agentPresetTitle
         )
+    }
+}
+
+/// iOS 26 才有的导航副标题；旧系统降级为无副标题。
+private struct NavigationSubtitleModifier: ViewModifier {
+    let subtitle: String
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.navigationSubtitle(subtitle)
+        } else {
+            content
+        }
     }
 }
 

@@ -66,6 +66,7 @@ struct TrajectoryView: View {
                     .padding(.horizontal, 18)
                     .readableContentWidth()
                 }
+                .modifier(SoftTopScrollEdgeEffect())
             }
         }
         .sheet(item: $selected) { EventDetailSheet(node: $0) }
@@ -118,6 +119,18 @@ struct TrajectoryView: View {
     }
 
     private var nodes: [TrajectoryNode] { timeline.nodes }
+}
+
+/// iOS 27 默认的滚动边缘效果偏“硬”，固定为 iOS 26 那种柔和的顶部渐进模糊。
+private struct SoftTopScrollEdgeEffect: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            content
+        }
+    }
 }
 
 fileprivate struct TrajectoryPresentation {

@@ -76,12 +76,14 @@ enum L10n {
 
     // MARK: Permission labels
 
-    static func permissionName(for id: String) -> String {
+    static func permissionName(for id: String, fallback: String? = nil) -> String {
         switch id {
+        case "auto": String(localized: "自动审查")
         case "read-only": String(localized: "只读")
         case "workspace-write": String(localized: "工作区写入")
         case "danger-full-access": String(localized: "完全访问")
-        default: id
+        case "custom": String(localized: "自定义")
+        default: fallback ?? id
         }
     }
 
