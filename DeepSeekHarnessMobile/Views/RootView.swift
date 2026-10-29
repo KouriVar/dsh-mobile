@@ -1007,12 +1007,11 @@ private struct ConversationNavigationShell<Content: View>: View {
                         .sharedBackgroundVisibility(.hidden)
                     }
                     if showsTeamEntry {
+                        // 与「更多」共用同一个工具栏胶囊：这里不隐藏共享底，也不插分隔。
                         ToolbarItem(placement: .topBarTrailing) {
                             TeamNavigationEntry(store: store)
                                 .fixedSize(horizontal: true, vertical: false)
                         }
-                        .sharedBackgroundVisibility(.hidden)
-                        ToolbarSpacer(.fixed, placement: .topBarTrailing)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         moreMenu

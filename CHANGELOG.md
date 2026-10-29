@@ -19,7 +19,7 @@
 - 「成员」入口（`TeamNavigationEntry`）移到原新建按钮的位置，与「更多」合并为一个工具栏胶囊；`compactHeader` 下右侧仅 2 个图标。
 - 同时移除未被启用的上游 principal 标题组件（`pageTitle`），标题统一走系统标题位。
 - 副标题只显示**项目文件夹名**（`conversationWorkspaceSubtitle` 不再拼接「· 主机」）。
-- 成员按钮去掉自带 `.glass()` 胶囊与工具栏共享底，只保留裸图标；「更多」保留独立胶囊。
+- 成员按钮去掉自带 `.glass()` 胶囊（避免双层底），与「更多」共用同一个工具栏胶囊，右侧仍是一个整体。
 - 返回键改为自绘 `chevron.left`（light 字重），并用 `InteractivePopGestureEnabler` 保住侧滑返回。
 
 ### 已知
