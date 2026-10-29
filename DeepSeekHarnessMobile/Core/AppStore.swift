@@ -387,6 +387,9 @@ final class AppStore: ObservableObject {
     @Published private(set) var scheduledTaskCompletedRequestID: String?
     @Published private(set) var scheduledTaskMutationError: String?
     @Published private(set) var pluginCatalog: MobilePluginCatalog?
+    /// 插件声明的移动端原生入口（`plugin-catalog.mobileEntries`），侧栏据此渲染动态导航行。
+    /// 只透传 gateway 已按「已启用插件」筛选过的条目；无条目时为 `[]`（侧栏不渲染任何动态行）。
+    @Published private(set) var mobilePluginEntries: [MobilePluginNavEntry] = []
     @Published private(set) var pluginsLoading = false
     @Published private(set) var pluginsError: String?
     @Published private(set) var pluginPendingName: String?
@@ -394,6 +397,9 @@ final class AppStore: ObservableObject {
     private var pluginCatalogRequestID: String?
     private var pluginToggleRequestID: String?
     private var pluginPageVisited = false
+    /// hello 是否声明了 `mobile-entries-v1`。只有声明过的网关才有动态侧栏入口，
+    /// 据此决定「没打开过插件页时要不要为侧栏提前拉目录」，保证旧网关行为不变。
+    private var gatewaySupportsMobileEntries = false
     private var scheduledTaskMutationRequestID: String?
     private var scheduledTaskMutationKind: String?
     @Published var workspaces: [GatewayWorkspace] = []
@@ -1624,8 +1630,10 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func refreshPlugins() {
-        pluginPageVisited = true
+    /// - Parameter markingPageVisited: 用户打开插件页时置 `true`。仅为填充侧栏动态入口、
+    ///   在连接建立后被动拉取时传 `false`，避免把「没进过插件页」误记为已访问。
+    func refreshPlugins(markingPageVisited: Bool = true) {
+        if markingPageVisited { pluginPageVisited = true }
         guard gateway.state.isConnected else {
             pluginsLoading = false
             pluginsError = "连接网关后可查看插件"
@@ -1671,19 +1679,26 @@ final class AppStore: ObservableObject {
     private func acceptPluginFrame(_ frame: GatewayFrame) {
         switch frame.kind {
         case "plugin-catalog" where frame.requestId == pluginCatalogRequestID:
+            let mobileEntries = MobilePluginNavEntry.ordered(frame.mobileEntries ?? [])
             pluginCatalog = MobilePluginCatalog(
                 managementAvailable: frame.managementAvailable == true,
                 settingsWritable: frame.settingsWritable == true,
                 bundles: (frame.bundles ?? []).map(MobilePluginBundle.init),
                 plugins: (frame.plugins ?? []).map(MobilePluginEntry.init),
-                officialItems: (frame.officialItems ?? []).map(MobileOfficialPlugin.init)
+                officialItems: (frame.officialItems ?? []).map(MobileOfficialPlugin.init),
+                mobileEntries: mobileEntries
             )
+            // 侧栏动态入口与插件目录同源更新；旧 gateway 不下发 mobileEntries 时为空数组。
+            mobilePluginEntries = mobileEntries
             pluginsLoading = false
             pluginsError = frame.managementAvailable == true ? nil : "当前 Host 不支持插件管理"
         case "plugins-changed":
             // The mutation response refreshes the catalog. Avoid a second fetch
             // for the same Host change while that response is still pending.
-            if pluginPageVisited && pluginToggleRequestID == nil { refreshPlugins() }
+            // 侧栏动态入口也依赖目录：网关声明了 mobile-entries-v1 时同样刷新。
+            if pluginToggleRequestID == nil, pluginPageVisited || gatewaySupportsMobileEntries {
+                refreshPlugins(markingPageVisited: pluginPageVisited)
+            }
         case "plugin-bundle-set-enabled", "plugin-entry-set-enabled":
             guard frame.requestId == pluginToggleRequestID else { return }
             let application = frame.result?["application"]?.stringValue
@@ -2914,7 +2929,14 @@ final class AppStore: ObservableObject {
         if ["session-queues", "session-queue", "queue-item-updated"].contains(frame.kind) { return }
         if frame.kind == "hello" {
             usesAssistantStream = frame.capabilities?.contains("assistant-stream-v1") == true
-            if pluginPageVisited { refreshPlugins() }
+            gatewaySupportsMobileEntries = frame.capabilities?.contains("mobile-entries-v1") == true
+            // 插件页已访问过时维持既有刷新逻辑；否则只在网关声明 `mobile-entries-v1` 时
+            // 为侧栏动态入口提前拉一次目录 —— 旧网关没有该能力，行为完全不变。
+            if pluginPageVisited {
+                refreshPlugins()
+            } else if gatewaySupportsMobileEntries {
+                refreshPlugins(markingPageVisited: false)
+            }
         }
         if frame.subscriptionId != nil { drainKMPEventDeliveries() }
         defer { if frame.subscriptionId != nil { drainKMPEventDeliveries() } }
@@ -4627,6 +4649,10 @@ final class AppStore: ObservableObject {
         workspaceCreationIsLoading = false
         isRefreshing = false
         waitingForNewSession = false
+        // 插件声明的侧栏入口随连接失效：断连后旧 Host 的入口不应继续留在侧栏。
+        // 所有断连路径（disconnect / 连接失败 / 连接失效）都会走到这里。
+        mobilePluginEntries = []
+        gatewaySupportsMobileEntries = false
     }
 
     @discardableResult

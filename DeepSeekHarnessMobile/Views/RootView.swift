@@ -87,6 +87,9 @@ private struct RootNavigationHost: View, Equatable {
                 },
                 onScheduledTasks: {
                     navigate(to: .scheduledTasks)
+                },
+                onPluginEntry: { entry in
+                    openPluginEntry(entry)
                 }
             )
                 .navigationDestination(for: AppRoute.self) { route in
@@ -166,6 +169,23 @@ private struct RootNavigationHost: View, Equatable {
                     navigationPath = [.conversation(header)]
                 }
             }
+        case .pluginSessions(let title, let titlePrefix, let workspaceTitle, let agentPreset):
+            PluginSessionsView(
+                title: title,
+                titlePrefix: titlePrefix,
+                workspaceTitle: workspaceTitle,
+                agentPreset: agentPreset,
+                onOpen: { session in
+                    // 与首页打开会话同一条路径：先 prepareConversation，再 push 聊天页。
+                    // 这里用 append，返回键会回到插件会话列表而不是首页。
+                    newConversationTask?.cancel()
+                    let header = conversationHeader(for: session)
+                    Task { @MainActor in
+                        guard await store.prepareConversation(for: session), !Task.isCancelled else { return }
+                        navigate(to: .conversation(header))
+                    }
+                }
+            )
         }
     }
 
@@ -193,6 +213,38 @@ private struct RootNavigationHost: View, Equatable {
     private func navigate(to route: AppRoute) {
         guard navigationPath.last != route else { return }
         navigationPath.append(route)
+    }
+
+    /// 侧栏插件动态入口（`mobileEntries`）的分发：
+    /// `kind = route` 映射到既有原生路由，`kind = sessions` push 原生会话列表。
+    private func openPluginEntry(_ entry: MobilePluginNavEntry) {
+        switch entry.kind {
+        case "route":
+            newConversationTask?.cancel()
+            switch entry.route {
+            case "sessions":
+                // 会话列表就是根视图，回到首页即可。
+                navigationPath = []
+            case "plugins":
+                navigate(to: .plugins)
+            case "scheduledTasks":
+                navigate(to: .scheduledTasks)
+            case "settings":
+                navigate(to: .settings)
+            default:
+                break
+            }
+        case "sessions":
+            let filters = entry.filters
+            navigate(to: .pluginSessions(
+                title: entry.title,
+                titlePrefix: filters?.titlePrefix,
+                workspaceTitle: filters?.workspaceTitle,
+                agentPreset: filters?.agentPreset
+            ))
+        default:
+            break
+        }
     }
 
     private func openLiveActivityURL(_ url: URL) {
@@ -261,6 +313,8 @@ private struct RootNavigationHost: View, Equatable {
         case settings
         case plugins
         case scheduledTasks
+        /// 插件动态入口（`kind = sessions`）push 的原生会话列表；filters 原样带过去。
+        case pluginSessions(title: String, titlePrefix: String?, workspaceTitle: String?, agentPreset: String?)
     }
 }
 

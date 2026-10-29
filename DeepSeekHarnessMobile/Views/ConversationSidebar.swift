@@ -22,6 +22,11 @@ struct AppSidebar: View {
     /// 内容检索结果（来自 AppStore.search），可为空。
     let searchResults: [GatewaySearchItem]
     var actions = AppSidebarActions()
+    /// 插件声明的移动端原生入口（`plugin-catalog.mobileEntries`）。
+    /// 为空时整段不渲染，保持「旧 gateway = 旧观感」。
+    var pluginEntries: [MobilePluginNavEntry] = []
+    /// 点击动态入口回传；由调用方决定 push 原生会话列表还是映射到既有路由。
+    var openPluginEntry: (MobilePluginNavEntry) -> Void = { _ in }
     /// 抽屉底部安全区高度（Home Indicator），底部按钮据此留白。
     var bottomInset: CGFloat = 0
     /// 搜索词变化时回传，由调用方决定是否调用 AppStore.search。
@@ -68,6 +73,18 @@ struct AppSidebar: View {
                         .scaledToFit()
                         .fontWeight(.regular)
                         .frame(width: 19, height: 19)
+                }
+
+                // 插件声明的动态入口：固定在功能导航（插件 / 定时任务）之后、「分割线 + 文件夹」之前
+                // （见 docs/mobile-entries.md「客户端行为」）。没有条目时不渲染任何东西。
+                ForEach(pluginEntries) { entry in
+                    navigationRow(entry.title, action: { openPluginEntry(entry) }) {
+                        Image(systemName: entry.icon ?? "square.grid.2x2")
+                            .resizable()
+                            .scaledToFit()
+                            .fontWeight(.regular)
+                            .frame(width: 19, height: 19)
+                    }
                 }
 
                 sectionDivider
@@ -511,5 +528,99 @@ struct SessionGroups: Equatable {
             }
         }
         return result
+    }
+}
+
+// MARK: - 插件入口的原生会话列表
+
+/// 插件动态入口（`kind = sessions`）push 进来的原生会话列表。
+///
+/// 为免改动 Xcode 工程文件，本视图写在 `ConversationSidebar.swift` 末尾而不是新建 .swift。
+/// 数据口径与首页抽屉、侧栏完全一致：`historySessions`（已排除团队子会话与子代理）
+/// 去掉已归档会话，再按入口下发的 filters 收窄。
+struct PluginSessionsView: View {
+    @EnvironmentObject private var store: AppStore
+
+    /// 导航栏标题（来自入口的 title）。
+    let title: String
+    /// 会话标题前缀过滤（`hasPrefix`）。
+    var titlePrefix: String? = nil
+    /// 工作区标题过滤：只保留该工作区 `sessionIds` 内的会话。
+    var workspaceTitle: String? = nil
+    /// Agent 预设过滤：只保留预设 id 相同的会话。
+    var agentPreset: String? = nil
+    /// 点击某条会话，由调用方负责 prepareConversation 与 push。
+    let onOpen: (SessionSummary) -> Void
+
+    var body: some View {
+        Group {
+            let sessions = filteredSessions
+            if sessions.isEmpty {
+                Text("暂无会话")
+                    .appFont(.system(size: 14))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(sessions) { session in
+                            sessionRow(session)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .systemBackground))
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("plugin-sessions-view")
+    }
+
+    /// 与首页同一口径的可见会话，再按 filters 逐项收窄；三个条件都缺省时返回全部可见会话。
+    private var filteredSessions: [SessionSummary] {
+        // historySessions 已排除团队子会话与子代理；与首页一样再排除已归档会话。
+        var result = store.historySessions.filter { !store.archivedSessionIds.contains($0.id) }
+        if let titlePrefix, !titlePrefix.isEmpty {
+            result = result.filter { $0.title.hasPrefix(titlePrefix) }
+        }
+        if let workspaceTitle, !workspaceTitle.isEmpty {
+            // 显式声明了工作区就只认它的 sessionIds；找不到同名工作区时结果为空。
+            let sessionIDs = Set(store.workspaces.first { $0.title == workspaceTitle }?.sessionIds ?? [])
+            result = result.filter { sessionIDs.contains($0.id) }
+        }
+        if let agentPreset, !agentPreset.isEmpty {
+            result = result.filter { $0.agentPreset == agentPreset }
+        }
+        return result.sorted { $0.lastActivity > $1.lastActivity }
+    }
+
+    /// 行样式对齐侧栏 `sessionRow`：运行绿点 + 单行标题 + 相对时间。
+    private func sessionRow(_ session: SessionSummary) -> some View {
+        Button {
+            onOpen(session)
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(session.isRunning ? Color.green : Color.secondary.opacity(0.35))
+                    .frame(width: 6, height: 6)
+                Text(session.title.isEmpty ? String(localized: "未命名会话") : session.title)
+                    .lineLimit(1)
+                    .appFont(.system(size: 15))
+                Spacer(minLength: 6)
+                Text(session.lastActivity.formatted(.relative(presentation: .named)))
+                    .lineLimit(1)
+                    .appFont(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minHeight: 40)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("plugin-session-\(session.id)")
     }
 }

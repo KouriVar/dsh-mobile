@@ -245,6 +245,8 @@ struct GatewayFrame: Codable, Sendable {
     var bundles: [JSONValue]?
     var plugins: [JSONValue]?
     var officialItems: [JSONValue]?
+    /// 插件声明的移动端原生入口（能力 `mobile-entries-v1`）；旧 gateway 不下发该字段。
+    var mobileEntries: [MobilePluginNavEntry]?
     var uploadId: String?
     var nextOffset: Int64?
     var maxBytes: Int64?
@@ -415,12 +417,62 @@ struct MobileOfficialPlugin: Identifiable {
     }
 }
 
+/// 插件下发的移动端入口过滤条件（协议 `mobileEntries[].filters`）。
+/// 三个字段都可选：缺省表示该维度不过滤（见 docs/mobile-entries.md）。
+struct MobilePluginNavEntryFilters: Codable, Hashable, Sendable {
+    var titlePrefix: String?
+    var agentPreset: String?
+    var workspaceTitle: String?
+}
+
+/// 插件在移动端声明的原生入口（`plugin-catalog` 的 `mobileEntries`，能力 `mobile-entries-v1`）。
+///
+/// 命名说明：`MobilePluginEntry` 已被插件管理目录条目占用（`MobilePluginCatalog.plugins`），
+/// 这里的动态导航入口因此带 `Nav` 前缀以示区分。
+struct MobilePluginNavEntry: Codable, Hashable, Sendable, Identifiable {
+    /// 协议里的 `id`，仅在所属插件内唯一。
+    var entryID: String
+    /// 声明该入口的插件名；旧数据可能缺省。
+    var plugin: String?
+    var title: String
+    /// SF Symbol 名，缺省时侧栏回退到 `square.grid.2x2`。
+    var icon: String?
+    var order: Int?
+    /// `sessions`（push 原生会话列表）或 `route`（映射到既有原生路由）。
+    var kind: String
+    /// 仅 `kind == "route"`：`sessions` / `plugins` / `scheduledTasks` / `settings`。
+    var route: String?
+    /// 仅 `kind == "sessions"`：会话过滤条件。
+    var filters: MobilePluginNavEntryFilters?
+
+    /// 跨插件全局唯一：plugin + ":" + id。
+    var id: String { "\(plugin ?? ""):\(entryID)" }
+
+    enum CodingKeys: String, CodingKey {
+        case entryID = "id"
+        case plugin, title, icon, order, kind, route, filters
+    }
+
+    /// 契约要求按 `order` 升序、再按 `title` 排序；gateway 已排好，这里再兜一次底。
+    static func ordered(_ entries: [MobilePluginNavEntry]) -> [MobilePluginNavEntry] {
+        entries.sorted { lhs, rhs in
+            let lhsOrder = lhs.order ?? 0
+            let rhsOrder = rhs.order ?? 0
+            if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+            return lhs.title < rhs.title
+        }
+    }
+}
+
 struct MobilePluginCatalog {
     let managementAvailable: Bool
     let settingsWritable: Bool
     let bundles: [MobilePluginBundle]
     let plugins: [MobilePluginEntry]
     let officialItems: [MobileOfficialPlugin]
+    /// 插件声明的移动端原生入口；缺省 `[]`（旧 gateway 无该字段）。
+    /// 用 `var` 是为了让它进入 memberwise init 且带默认值。
+    var mobileEntries: [MobilePluginNavEntry] = []
     var officialBundles: [MobilePluginBundle] {
         sortBundles(bundles.filter { $0.visible && $0.isOfficial })
     }

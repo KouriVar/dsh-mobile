@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased] — 插件移动端入口协议（mobileEntries v1）
+
+### 新增
+- gateway：`plugin-catalog` 新增 `mobileEntries`，来源为各 bundle 的 `dsh.mobile.entries`；字段校验、排序、每插件 8 条 / 总计 16 条限额，非法条目整条丢弃并写日志。`hello` 新增 capability `mobile-entries-v1`。协议见 `dsh-plugin-mobile-gateway/docs/mobile-entries.md`。
+- iOS：侧栏在「插件 / 定时任务」之后渲染插件声明的原生入口；`kind=route` 映射既有路由，`kind=sessions` push 原生会话列表（按 `titlePrefix` / `workspaceTitle` / `agentPreset` 过滤，点进即对话）。hello 声明 `mobile-entries-v1` 时主动拉取目录，旧网关行为不变，断连清空。
+- ds-bot：`package.json` 声明 `Bot` 入口；bot 会话标题改为 `Bot · <名称>`，供移动端按前缀识别。
+
+### 说明
+- 本版本只做原生入口，不渲染插件网页（DSH Web 仅监听 loopback 且需启动令牌，另有可选方案待评估）。
+
 ## [Unreleased] — 首页侧边栏（ChatGPT 式）与品牌调整
 
 ### 品牌

@@ -12,6 +12,8 @@ struct WorkspaceView: View {
     let onSettings: () -> Void
     let onPlugins: () -> Void
     let onScheduledTasks: () -> Void
+    /// 插件声明的动态入口（`mobileEntries`）：`kind = route` 映射既有路由，`kind = sessions` push 原生列表。
+    let onPluginEntry: (MobilePluginNavEntry) -> Void
     @State private var searchQuery = ""
     @State private var renamingSession: SessionSummary?
     @State private var renamedTitle = ""
@@ -313,6 +315,9 @@ struct WorkspaceView: View {
                 openScheduledTasks: { selectDrawerItem(onScheduledTasks) },
                 openSettings: { selectDrawerItem(onSettings) }
             ),
+            pluginEntries: store.mobilePluginEntries,
+            // 与其它导航项一致：先收起抽屉，再交给宿主决定 push 原生页还是映射路由。
+            openPluginEntry: { entry in selectDrawerItem { onPluginEntry(entry) } },
             bottomInset: bottomInset,
             onSearchQueryChange: { query in
                 // 抽屉搜索与首页搜索共用 store 的检索状态：首页已有查询词时不覆盖。
